@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from astropy.io import fits
+from dataclasses import dataclass
 from matplotlib import cm
 from scipy import signal
 from skimage.feature import canny
@@ -23,37 +24,51 @@ from skimage.transform import hough_line, hough_line_peaks, rescale, resize
 # * make sure line length algorithm is robust
 #   * Take top n line start/stops and iterate through combinations, taking the one with the highest (and most consistent?) luminosity
 
-def main(im, downscale=1, plot=False, num_satellites=1):
+@dataclass
+class SatAngleParams:
+    expected_angle_deg: float
+    angle_tol_deg: float
+    angle_disretization_deg: float
+
+def _get_test_angles(sat_angle_params: SatAngleParams):
+    if sat_angle_params.expected_angle_deg is None:
+        tested_angles = np.linspace(0, 2 * np.pi, round(360/sat_angle_params.angle_disretization_deg), endpoint=False)
+    else:
+        assert sat_angle_params.angle_tol_deg < 180, "Angle tolerance is to high, just set expected_angle_deg to None"
+        tested_angles = np.linspace(
+            np.radians(sat_angle_params.expected_angle_deg-sat_angle_params.angle_tol_deg),
+            np.radians(sat_angle_params.expected_angle_deg+sat_angle_params.angle_tol_deg),
+            round(2*sat_angle_params.angle_tol_deg/sat_angle_params.angle_disretization_deg)
+        )
+    return tested_angles
+
+
+def cmd_line_main(im_file, plot=False):
     # load FITS data in as an np.array
-    with fits.open(im) as hdul:
+    with fits.open(im_file) as hdul:
         X = hdul[0].data
+    _ = find_sattellites_in_image(X,1,DEFAULT_SAT_ANGLE_PARAMS,plot=plot)
+
+DEFAULT_SAT_ANGLE_PARAMS = SatAngleParams(None,None,0.5)
+def find_sattellites_in_image(X, num_satellites, sat_angle_params,plot=False):
+    # handle zeros for transformation to log space
+    X[X<=0] = X[X>0].min()
     # transform to log space
     X = 10 * np.log10(X)
-    # handle -infs and NaNs
-    # TODO just make sure there are no zeros in X
-    X[~np.isfinite(X)] = np.min(X[np.isfinite(X)])
+    assert np.all(np.isfinite(X))
     # Shift up so all values are positive
     X -= X.min()
-    image = X
-    # optionally downscale
-    if downscale != 1:
-        image = resize(
-            image,
-            (image.shape[0] // downscale, image.shape[1] // downscale),
-            anti_aliasing=True,
-        )
+
     # use basic threshold to create binary image.
-    # TODO is 90% background a safe assumption?
-    edges = image > np.quantile(image.flatten(), 0.90)
-    # test all posible angles with a 0.5 degree discretization
-    # TODO limit angle search
-    tested_angles = np.linspace(0, 2 * np.pi, 720, endpoint=False)
+    # TODO is 95% background a safe assumption? Probably not, 90% background breaks on a least one image.
+    # * There seems to be a _lot_ of discretization at the lower levels, maybe we can make use of that instead
+    edges = X > np.quantile(X.flatten(), 0.95)
     # do hough transform and find most prominant line
-    h, theta, d = hough_line(edges, theta=tested_angles)
+    h, theta, d = hough_line(edges, theta=_get_test_angles(sat_angle_params))
     if plot:
         fig, axes = plt.subplots(1, 3, figsize=(15, 6))
         ax = axes.ravel()
-        ax[0].imshow(image, cmap=cm.gray)
+        ax[0].imshow(X, cmap=cm.gray)
         ax[0].set_title("Input image")
         ax[0].set_axis_off()
         angle_step = 0.5 * np.diff(theta).mean()
@@ -69,8 +84,8 @@ def main(im, downscale=1, plot=False, num_satellites=1):
         ax[1].set_xlabel("Angles (degrees)")
         ax[1].set_ylabel("Distance (pixels)")
         ax[1].axis("image")
-        ax[2].imshow(image, cmap=cm.gray)
-        ax[2].set_ylim((image.shape[0], 0))
+        ax[2].imshow(X, cmap=cm.gray)
+        ax[2].set_ylim((X.shape[0], 0))
         ax[2].set_axis_off()
         ax[2].set_title("Detected lines")
     traces = []
@@ -82,7 +97,7 @@ def main(im, downscale=1, plot=False, num_satellites=1):
         m = np.tan(angle + np.pi / 2)
         b = y0 - m * x0
         x_cross = -b / m
-        y_max = image.shape[0]
+        y_max = X.shape[0]
         x_end = (y_max - b) / m
         x0, y0, x1, y1 = x_cross, 0, x_end, y_max
         # find indexes of line on image, with no repeated pixes
@@ -107,19 +122,23 @@ def main(im, downscale=1, plot=False, num_satellites=1):
         end_ix = np.argmin(dz)
         x_start = x[start_ix]
         y_start = y[start_ix]
-        x_end = x[end_ix-]
-        y_end = y[end_ix-]
+        x_end = x[end_ix-1]
+        y_end = y[end_ix-1]
         # store indices and luminosity
-        traces.append((x[start_ix:end_ix],y[start_ix:end_ix]),z[start_ix:end_ix])
         if plot:
             ax[2].plot([x_start, x_end], [y_start, y_end], marker="x", color="r")
+
+        traces.append((x[start_ix:end_ix],y[start_ix:end_ix]))
+
     if plot:
         plt.tight_layout()
         plt.show()
-        plt.plot(z, marker="x", color="k")
+        # plt.plot(z, marker="x", color="k")
+        # plt.plot(dz, marker="", color="r",linestyle=':')
+        # plt.show()
 
     return traces
 
 
 if __name__ == "__main__":
-    fire.Fire(main)
+    fire.Fire(cmd_line_main)
