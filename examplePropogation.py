@@ -10,10 +10,10 @@ from skyfield import api
 
 
 #Important things
-filename = "44932.txt"
+filename = "45748.txt"
 location = locations["Lemmon"]
-timeStart = dt.datetime(2021,5,6,11,21,39,0, tzinfo=api.utc)
-timeEnd = dt.datetime(2021,5,6,11,21,39+3,0, tzinfo=api.utc)
+timeStart = dt.datetime(2020,9,8,3,44,47,760000, tzinfo=api.utc)
+timeEnd = dt.datetime(2020,9,8,3,44,47+3,760000, tzinfo=api.utc)
 
 
 #Load TLE from a local file
