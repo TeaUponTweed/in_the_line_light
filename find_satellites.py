@@ -11,7 +11,15 @@ from matplotlib import cm
 from scipy import signal
 from skimage.feature import canny
 from skimage.transform import hough_line, hough_line_peaks, rescale, resize
-
+from dateutil import parser
+from loadTLE import loadTLEFile
+from skyfield import api
+from locations import locations
+from satFunctions import computeEphemeris
+import datetime
+from astropy import units as u
+from astropy.coordinates import SkyCoord
+from astropy.wcs import WCS
 # TODO
 # * expand rectangle around satellite trace and find associated pixels
 #   * how to handle crossing events? Ideally we'd get both traces and disambiguate the crossing point
@@ -43,11 +51,39 @@ def _get_test_angles(sat_angle_params: SatAngleParams):
     return tested_angles
 
 
+def get_relevant_tle(norad_id,timestamp):
+    return loadTLEFile('45748.txt')[0]
+
 def cmd_line_main(im_file, plot=False):
     # load FITS data in as an np.array
     with fits.open(im_file) as hdul:
+        assert len(hdul) == 1
+        date_str = hdul[0].header['DATE-OBS']
+        obs_loc = locations[hdul[0].header['OBSERVAT'].rstrip()]
+        exposure_time_s = float(hdul[0].header['EXPOSURE'])
         X = hdul[0].data
-    _ = find_sattellites_in_image(X,1,DEFAULT_SAT_ANGLE_PARAMS,plot=plot)
+        # TODO hook this up to db
+        tle = get_relevant_tle(None,date_str)
+        time_start = parser.parse(date_str).replace(tzinfo=api.utc)
+        time_end = time_start + datetime.timedelta(seconds=exposure_time_s)
+        start = computeEphemeris(tle, obs_loc, time_start)
+        end = computeEphemeris(tle, obs_loc, time_end)
+
+        w = WCS(hdul[0].header)
+        from pprint import pprint
+        # pprint(start)
+        c_start = SkyCoord(ra=np.array([start['ra']])*u.hour, dec=np.array([start['dec']])*u.degree)
+        c_end = SkyCoord(ra=np.array([end['ra']])*u.hour, dec=np.array([end['dec']])*u.degree)
+
+        px_x_start, px_y_start = w.world_to_pixel(c_start)
+        px_x_end, px_y_end = w.world_to_pixel(c_end)
+
+    traces,X = find_sattellites_in_image(X,1,DEFAULT_SAT_ANGLE_PARAMS,plot=plot)
+    plt.imshow(X,cmap=cm.gray)
+    for xx,yy in traces:
+        plt.plot(xx,yy,marker='x',linestyle='')
+    plt.plot([px_x_start, px_x_end], [px_y_start, px_y_end],color='y')
+    plt.show()
 
 DEFAULT_SAT_ANGLE_PARAMS = SatAngleParams(None,None,0.5)
 def find_sattellites_in_image(X, num_satellites, sat_angle_params,plot=False):
@@ -137,7 +173,7 @@ def find_sattellites_in_image(X, num_satellites, sat_angle_params,plot=False):
         # plt.plot(dz, marker="", color="r",linestyle=':')
         # plt.show()
 
-    return traces
+    return traces,X
 
 
 if __name__ == "__main__":

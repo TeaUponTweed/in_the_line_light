@@ -45,7 +45,7 @@ locations["Bok"] = Topos(31.9629, -111.6004, elevation_m=2071)
 locations["Lemmon"] = Topos(32.44257, -110.7889, elevation_m=2805)
 
 #Biosphere2
-locations["Biosphere2"] = Topos(32.58057, -110.8490, elevation_m=1164)
+locations["Biosphere"] = Topos(32.58057, -110.8490, elevation_m=1164)
 
 
 ###################################################################
